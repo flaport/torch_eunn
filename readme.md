@@ -16,6 +16,10 @@ Neural Network (EUNN) Cell. This implementation was based on the tunable EUNN pr
     from torch_eunn import EUNN # Recurrent unit
 ```
 
+## Examples
+
+* 00: [Simple Tests](examples/00_simple_tests.ipynb)
+
 ## Requirements
 
 * [PyTorch](http://pytorch.org) >= 0.4.0: `conda install pytorch -c pytorch`

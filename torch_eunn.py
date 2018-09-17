@@ -26,7 +26,7 @@ based on https://arxiv.org/abs/1612.05231
 
 name = 'torch_eunn'
 __author__ = 'Floris Laporte'
-__version__ = '0.1'
+__version__ = '0.1.1'
 
 
 #############
