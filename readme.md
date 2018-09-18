@@ -1,6 +1,6 @@
 # torch_eunn
 
-This repository contains a simple pytorch implementation of a Tunable Efficient Unitary
+This repository contains a simple PyTorch implementation of a Tunable Efficient Unitary
 Neural Network (EUNN) Cell. This implementation was based on the tunable EUNN presented in this paper:
 [https://arxiv.org/abs/1612.05231](https://arxiv.org/abs/1612.05231).
 
@@ -19,6 +19,7 @@ Neural Network (EUNN) Cell. This implementation was based on the tunable EUNN pr
 ## Examples
 
 * 00: [Simple Tests](examples/00_simple_tests.ipynb)
+* 01: [Copying Task](examples/01_copying_task.ipynb)
 
 ## Requirements
 
