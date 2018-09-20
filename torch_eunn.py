@@ -26,7 +26,7 @@ based on https://arxiv.org/abs/1612.05231
 
 name = 'torch_eunn'
 __author__ = 'Floris Laporte'
-__version__ = '0.1.1'
+__version__ = '0.1.3'
 
 
 #############
@@ -223,6 +223,12 @@ class EUNNLayer(torch.nn.Module):
         return v_diag, v_off_diag
 
     def forward(self, x):
+        ''' forward pass through the layer
+
+        Args:
+            x (torch.tensor): Tensor with shape (batch_size, feature_size, 2=(real|imag))
+        '''
+
         # calculate derived parameters once:
         params = self._get_params()
 
@@ -296,6 +302,14 @@ class EUNN(torch.nn.Module):
 
 
     def forward(self, input, state=None):
+        ''' forward pass through the RNN
+
+        Args:
+            input (torch.tensor): Tensor with shape
+                (sequence_length, batch_size, feature_size, 2) if batch_first==False
+                (batch_size, sequence_length, feature_size, 2) if batch_first==True
+
+        '''
 
         # apply the input layer to the input up front
         input_shape = input.shape
