@@ -34,7 +34,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/flaport/torch_eunn",
-    py_modules=['torch_eunn'],
+    py_modules=["torch_eunn"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

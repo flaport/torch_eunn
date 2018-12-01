@@ -13,7 +13,7 @@ Neural Network (EUNN) Cell. This implementation was based on the tunable EUNN pr
 ## Usage
 ```python
     from torch_eunn import EUNNLayer # feed forward layer
-    from torch_eunn import EUNN # Recurrent unit
+    from torch_eunn import EUNN # recurrent unit
 ```
 
 ## Examples
