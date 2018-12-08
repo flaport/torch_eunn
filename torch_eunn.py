@@ -98,18 +98,18 @@ class ModReLU(torch.nn.Module):
 ###################
 
 
-class EUNNLayer(torch.nn.Module):
+class EUNN(torch.nn.Module):
     """ Efficient Unitary Neural Network Layer
 
     This layer works similarly as a torch.nn.Linear layer. The difference in this case
     is however that the action of this layer can be represented by a unitary matrix.
 
-    This EUNNLayer was based on the tunable version of the EUNN proposed in
+    This EUNN was based on the tunable version of the EURNN proposed in
     https://arxiv.org/abs/1612.05231.
     """
 
     def __init__(self, hidden_size, capacity=None):
-        """ EUNNLayer __init__
+        """ EUNN __init__
 
         Args:
             hidden_size (int): the size of the unitary matrix this cell represents.
@@ -120,7 +120,7 @@ class EUNNLayer(torch.nn.Module):
                 capacity is usually preferred.
         """
 
-        super(EUNNLayer, self).__init__()
+        super(EUNN, self).__init__()
 
         # handle inputs
         self.hidden_size = int(hidden_size)
@@ -310,21 +310,21 @@ class EUNNLayer(torch.nn.Module):
 ####################
 
 
-class EUNN(torch.nn.Module):
-    """ Pytorch EUNN Recurrent unit
+class EURNN(torch.nn.Module):
+    """ Pytorch EURNN Recurrent unit
 
     This recurrent cell works similarly as a torch.nn.RNN layer. The difference in this
     case is however that the action of the internal weight matrix can be represented by
     a unitary matrix.
 
-    This EUNN was based on the tunable version of the EUNN proposed in
+    This EURNN was based on the tunable version of the EURNN proposed in
     https://arxiv.org/abs/1612.05231.
     """
 
     def __init__(
         self, input_size, hidden_size, capacity=2, output_type="real", batch_first=False
     ):
-        """ EUNN __init__
+        """ EURNN __init__
 
         Args:
             input_size (int): the size of the input vector
@@ -339,7 +339,7 @@ class EUNN(torch.nn.Module):
             batch_first (bool): if the first dimension of the input vector is the
                 batch or the sequence.
         """
-        super(EUNN, self).__init__()
+        super(EURNN, self).__init__()
         self.hidden_size = hidden_size
         self.batch_first = batch_first
         self.output_function = {
@@ -351,7 +351,7 @@ class EUNN(torch.nn.Module):
         self.output_type = output_type
 
         self.input_layer = torch.nn.Linear(input_size, hidden_size, bias=False)
-        self.hidden_layer = EUNNLayer(hidden_size, capacity=capacity)
+        self.hidden_layer = EUNN(hidden_size, capacity=capacity)
         self.modrelu = ModReLU()
 
     def forward(self, input, state=None):
