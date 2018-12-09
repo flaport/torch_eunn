@@ -104,8 +104,11 @@ class EUNN(torch.nn.Module):
     This layer works similarly as a torch.nn.Linear layer. The difference in this case
     is however that the action of this layer can be represented by a unitary matrix.
 
-    This EUNN was based on the tunable version of the EURNN proposed in
-    https://arxiv.org/abs/1612.05231.
+    This EUNN is loosely based on the tunable version of the EUNN proposed in
+    https://arxiv.org/abs/1612.05231. However, the last diagonal matrix of phases
+    was removed in favor of periodic boundary conditions. This makes the algorithm
+    considerably faster and more stable.
+
     """
 
     def __init__(self, hidden_size, capacity=None):
@@ -119,189 +122,91 @@ class EUNN(torch.nn.Module):
                 introduces a speed penalty. In recurrent neural networks, a small
                 capacity is usually preferred.
         """
+        # validate parameters
+        if hidden_size % 2 != 0:
+            raise ValueError('EUNN hidden_size should be even')
+        if capacity is None:
+            capacity = hidden_size
+        elif capacity % 2 != 0:
+            raise ValueError('EUNN capacity should be even')
 
+        self.hidden_size = int(round(hidden_size))
+        self.capacity = int(round(capacity))
+
+        # initialize
         super(EUNN, self).__init__()
 
-        # handle inputs
-        self.hidden_size = int(hidden_size)
-        self.capacity = int(capacity) if capacity else self.hidden_size
-        self.even_hidden_size = self.hidden_size // 2
-        self.odd_hidden_size = (self.hidden_size - 1) // 2
-        self.even_capacity = (self.capacity + 1) // 2
-        self.odd_capacity = self.capacity // 2
+        # phi and theta for the even layers (count starts at 0)
+        self.phi0 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
+        self.theta0 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
 
-        # Create parameters
-        self.omega = torch.nn.Parameter(torch.rand(self.hidden_size) * 2 * pi - pi)
-        self.even_theta = torch.nn.Parameter(
-            torch.rand(self.even_capacity, self.even_hidden_size) * 2 * pi - pi
-        )
-        self.odd_theta = torch.nn.Parameter(
-            torch.rand(self.odd_capacity, self.odd_hidden_size) * 2 * pi - pi
-        )
-        self.even_phi = torch.nn.Parameter(
-            torch.rand(self.even_capacity, self.even_hidden_size) * 2 * pi - pi
-        )
-        self.odd_phi = torch.nn.Parameter(
-            torch.rand(self.odd_capacity, self.odd_hidden_size) * 2 * pi - pi
-        )
-
-        # Permutation indices for off diagonal rotation multiplications
-        if self.hidden_size % 2 == 0:
-            self._permutation_indices = {
-                0: [
-                    int(i + 0.5)
-                    for i in torch.arange(self.even_hidden_size * 2)
-                    .view(-1, 2)[:, [1, 0]]
-                    .view(-1)
-                    .numpy()
-                ],
-                1: [0]
-                + [
-                    int(i + 0.5)
-                    for i in torch.arange(1, self.odd_hidden_size * 2 + 1)
-                    .view(-1, 2)[:, [1, 0]]
-                    .view(-1)
-                    .numpy()
-                ]
-                + [self.odd_hidden_size * 2 + 1],
-            }
-        else:
-            self._permutation_indices = {
-                0: [
-                    int(i + 0.5)
-                    for i in torch.arange(self.even_hidden_size * 2)
-                    .view(-1, 2)[:, [1, 0]]
-                    .view(-1)
-                    .numpy()
-                ]
-                + [self.even_hidden_size * 2],
-                1: [0]
-                + [
-                    int(i + 0.5)
-                    for i in torch.arange(1, self.odd_hidden_size * 2 + 1)
-                    .view(-1, 2)[:, [1, 0]]
-                    .view(-1)
-                    .numpy()
-                ],
-            }
-
-    def _v_diag(self, i, cos_theta, sin_phi, cos_phi):
-        """ vector with diagonal elements of rotation """
-        even = i % 2 == 0
-        zeros = torch.zeros_like(cos_theta)
-        zero = zeros[:1]
-        one = torch.ones_like(zero)
-
-        v_diag_re = torch.stack([(cos_phi * cos_theta), cos_theta], 1).view(-1)
-        v_diag_im = torch.stack([(sin_phi * cos_theta), zeros], 1).view(-1)
-
-        if not even:
-            v_diag_re = torch.cat([one, v_diag_re])
-            v_diag_im = torch.cat([zero, v_diag_im])
-            if self.hidden_size % 2 == 0:
-                v_diag_re = torch.cat([v_diag_re, one])
-                v_diag_im = torch.cat([v_diag_im, zero])
-        elif self.hidden_size % 2:
-            v_diag_re = torch.cat([v_diag_re, one])
-            v_diag_im = torch.cat([v_diag_im, zero])
-
-        return torch.stack([v_diag_re, v_diag_im], -1)
-
-    def _v_off_diag(self, i, sin_theta, sin_phi, cos_phi):
-        """ vector with off-diagonal elements of rotation """
-        even = i % 2 == 0
-        zeros = torch.zeros_like(sin_theta)
-        zero = zeros[:1]
-
-        v_off_diag_re = torch.stack([(-cos_phi * sin_theta), sin_theta], 1).view(-1)
-        v_off_diag_im = torch.stack([(-sin_phi * sin_theta), zeros], 1).view(-1)
-
-        if not even:
-            v_off_diag_re = torch.cat([zero, v_off_diag_re])
-            v_off_diag_im = torch.cat([zero, v_off_diag_im])
-            if self.hidden_size % 2 == 0:
-                v_off_diag_re = torch.cat([v_off_diag_re, zero])
-                v_off_diag_im = torch.cat([v_off_diag_im, zero])
-        elif self.hidden_size % 2:
-            v_off_diag_re = torch.cat([v_off_diag_re, zero])
-            v_off_diag_im = torch.cat([v_off_diag_im, zero])
-
-        return torch.stack([v_off_diag_re, v_off_diag_im], -1)
-
-    def _permute(self, i, x):
-        """ permute vector before off-diagonal multiplication """
-        idxs = self._permutation_indices[i % 2]
-        return x[:, idxs, :]
-
-    def _get_params(self):
-        """ derived parameters """
-        params = {
-            "cos_even_theta": torch.cos(self.even_theta),
-            "sin_even_theta": torch.sin(self.even_theta),
-            "cos_odd_theta": torch.cos(self.odd_theta),
-            "sin_odd_theta": torch.sin(self.odd_theta),
-            "cos_even_phi": torch.cos(self.even_phi),
-            "sin_even_phi": torch.sin(self.even_phi),
-            "cos_odd_phi": torch.cos(self.odd_phi),
-            "sin_odd_phi": torch.sin(self.odd_phi),
-        }
-        return params
-
-    def _rotation_vectors(self, i, params):
-        """ choose the parameters to use """
-        if i % 2:
-            cos_theta, sin_theta, cos_phi, sin_phi = (
-                params["cos_odd_theta"][i // 2],  # cos_theta
-                params["sin_odd_theta"][i // 2],  # sin_theta
-                params["cos_odd_phi"][i // 2],  # cos_phi
-                params["sin_odd_phi"][i // 2],
-            )  # sin_phi
-        else:
-            cos_theta, sin_theta, cos_phi, sin_phi = (
-                params["cos_even_theta"][i // 2],  # cos_theta
-                params["sin_even_theta"][i // 2],  # sin_theta
-                params["cos_even_phi"][i // 2],  # cos_phi
-                params["sin_even_phi"][i // 2],
-            )  # sin_phi
-
-        # get diagonal rotation vector
-        v_diag = self._v_diag(i, cos_theta, cos_phi, sin_phi)
-
-        # get off-diagonal rotation vector
-        v_off_diag = self._v_off_diag(i, sin_theta, cos_phi, sin_phi)
-
-        return v_diag, v_off_diag
+        # phi and theta for the odd layers (count starts at 0)
+        self.phi1 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
+        self.theta1 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
 
     def forward(self, x):
         """ forward pass through the layer
 
         Args:
-            x (torch.tensor): Tensor with shape (batch_size, feature_size, 2=(real|imag))
+            x (torch.tensor): Tensor with shape (batch_size, hidden_size, 2=(real|imag))
         """
 
-        # calculate derived parameters once:
-        params = self._get_params()
+        # get and validate shape of input tensor:
+        bs, hidden_size, ri = x.shape
+        if hidden_size != self.hidden_size:
+            raise ValueError('Input tensor for EUNN Layer has size %i, '
+                             'but the EUNN Layer expects a size of %i'%(hidden_size, self.hidden_size))
+        elif ri != 2:
+            raise ValueError('Input tensor for EUNN Layer should be complex, '
+                             'with the complex components stored in the last dimension (x.shape[2]==2)')
 
-        # Loop over the capacity of the matrix
-        for i in range(self.capacity):
+        # calculate the sin and cos of rotaion angles
+        cos_phi0 = torch.cos(self.phi0)
+        sin_phi0 = torch.sin(self.phi0)
+        cos_theta0 = torch.cos(self.theta0)
+        sin_theta0 = torch.sin(self.theta0)
+        cos_phi1 = torch.cos(self.phi1)
+        sin_phi1 = torch.sin(self.phi1)
+        cos_theta1 = torch.cos(self.theta1)
+        sin_theta1 = torch.sin(self.theta1)
 
-            # get rotation vectors
-            v_diag, v_off_diag = self._rotation_vectors(i, params)
+        # calculate the rotation vectors
+        # shape = (capacity//2, 1, hidden_size, 2=(real|imag))
+        zeros = torch.zeros_like(cos_theta0)
+        diag0 = torch.stack([
+            torch.stack([cos_phi0*cos_theta0, cos_theta0], 1).view(-1, self.capacity//2),
+            torch.stack([sin_phi0*cos_theta0, zeros], 1).view(-1, self.capacity//2),
+        ], -1).unsqueeze(0).permute(2,0,1,3)
+        offdiag0 = torch.stack([
+            torch.stack([-cos_phi0*sin_theta0, sin_theta0], 1).view(-1, self.capacity//2),
+            torch.stack([-sin_phi0*sin_theta0, zeros], 1).view(-1, self.capacity//2),
+        ], -1).unsqueeze(0).permute(2,0,1,3)
 
-            # perform diagonal part of rotation
-            x_diag = cm(x, v_diag)
+        diag1 = torch.stack([
+            torch.stack([cos_phi1*cos_theta1, cos_theta1], 1).view(-1, self.capacity//2),
+            torch.stack([sin_phi1*cos_theta1, zeros], 1).view(-1, self.capacity//2),
+        ], -1).unsqueeze(0).permute(2,0,1,3)
+        offdiag1 = torch.stack([
+            torch.stack([-cos_phi1*sin_theta1, sin_theta1], 1).view(-1, self.capacity//2),
+            torch.stack([-sin_phi1*sin_theta1, zeros], 1).view(-1, self.capacity//2),
+        ], -1).unsqueeze(0).permute(2,0,1,3)
 
-            # perform off-diagonal part of rotation
-            x_off_diag = self._permute(i, x)
-            x_off_diag = cm(x_off_diag, v_off_diag)
+        # loop over the capacity
+        for d0, d1, o0, o1 in zip(diag0, diag1, offdiag0, offdiag1):
+            # first layer
+            x_perm = torch.stack([x[:,1::2], x[:,::2]], 2).view(bs, self.hidden_size, 2)
+            x = cm(x, d0) + cm(x_perm, o0)
 
-            # sum results of diagonal and off-diagonal rotation
-            x = x_diag + x_off_diag
+            # periodic boundary conditions
+            x = torch.cat([x[:,1:], x[:,:1]], 1)
 
-        # add a final phase
-        x = cm(x, torch.stack([torch.cos(self.omega), torch.sin(self.omega)], -1))
+            # second layer
+            x_perm = torch.stack([x[:,1::2], x[:,::2]], 2).view(bs, self.hidden_size, 2)
+            x = cm(x, d1) + cm(x_perm, o1)
 
-        # return real and imaginary part of the multiplication:
+            # periodic boundary conditions
+            x = torch.cat([x[:,-1:], x[:,:-1]], 1)
+
         return x
 
 
