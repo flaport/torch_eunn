@@ -24,22 +24,21 @@ based on https://arxiv.org/abs/1612.05231
 
 """
 
+
+## Properties
+
 name = "torch_eunn"
 __author__ = "Floris Laporte"
 __version__ = "0.1.3"
 
 
-#############
-## Imports ##
-#############
+## Imports
 
 import torch
 from math import pi
 
 
-######################
-## Useful Functions ##
-######################
+## Useful Functions
 
 
 def cm(x, y):
@@ -61,9 +60,7 @@ def cm(x, y):
     return result
 
 
-##################
-## Modular ReLU ##
-##################
+## Modular ReLU
 
 
 class ModReLU(torch.nn.Module):
@@ -93,9 +90,7 @@ class ModReLU(torch.nn.Module):
         return modrelu
 
 
-###################
-## Forward Layer ##
-###################
+## Feed-forward Layer
 
 
 class EUNN(torch.nn.Module):
@@ -124,11 +119,11 @@ class EUNN(torch.nn.Module):
         """
         # validate parameters
         if hidden_size % 2 != 0:
-            raise ValueError('EUNN hidden_size should be even')
+            raise ValueError("EUNN hidden_size should be even")
         if capacity is None:
             capacity = hidden_size
         elif capacity % 2 != 0:
-            raise ValueError('EUNN capacity should be even')
+            raise ValueError("EUNN capacity should be even")
 
         self.hidden_size = int(round(hidden_size))
         self.capacity = int(round(capacity))
@@ -137,12 +132,20 @@ class EUNN(torch.nn.Module):
         super(EUNN, self).__init__()
 
         # phi and theta for the even layers (count starts at 0)
-        self.phi0 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
-        self.theta0 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
+        self.phi0 = torch.nn.Parameter(
+            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
+        )
+        self.theta0 = torch.nn.Parameter(
+            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
+        )
 
         # phi and theta for the odd layers (count starts at 0)
-        self.phi1 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
-        self.theta1 = torch.nn.Parameter(2*pi*torch.randn(self.hidden_size//2, self.capacity//2))
+        self.phi1 = torch.nn.Parameter(
+            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
+        )
+        self.theta1 = torch.nn.Parameter(
+            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
+        )
 
     def forward(self, x):
         """ forward pass through the layer
@@ -154,11 +157,16 @@ class EUNN(torch.nn.Module):
         # get and validate shape of input tensor:
         bs, hidden_size, ri = x.shape
         if hidden_size != self.hidden_size:
-            raise ValueError('Input tensor for EUNN Layer has size %i, '
-                             'but the EUNN Layer expects a size of %i'%(hidden_size, self.hidden_size))
+            raise ValueError(
+                "Input tensor for EUNN Layer has size %i, "
+                "but the EUNN Layer expects a size of %i"
+                % (hidden_size, self.hidden_size)
+            )
         elif ri != 2:
-            raise ValueError('Input tensor for EUNN Layer should be complex, '
-                             'with the complex components stored in the last dimension (x.shape[2]==2)')
+            raise ValueError(
+                "Input tensor for EUNN Layer should be complex, "
+                "with the complex components stored in the last dimension (x.shape[2]==2)"
+            )
 
         # calculate the sin and cos of rotaion angles
         cos_phi0 = torch.cos(self.phi0)
@@ -173,46 +181,92 @@ class EUNN(torch.nn.Module):
         # calculate the rotation vectors
         # shape = (capacity//2, 1, hidden_size, 2=(real|imag))
         zeros = torch.zeros_like(cos_theta0)
-        diag0 = torch.stack([
-            torch.stack([cos_phi0*cos_theta0, cos_theta0], 1).view(-1, self.capacity//2),
-            torch.stack([sin_phi0*cos_theta0, zeros], 1).view(-1, self.capacity//2),
-        ], -1).unsqueeze(0).permute(2,0,1,3)
-        offdiag0 = torch.stack([
-            torch.stack([-cos_phi0*sin_theta0, sin_theta0], 1).view(-1, self.capacity//2),
-            torch.stack([-sin_phi0*sin_theta0, zeros], 1).view(-1, self.capacity//2),
-        ], -1).unsqueeze(0).permute(2,0,1,3)
+        diag0 = (
+            torch.stack(
+                [
+                    torch.stack([cos_phi0 * cos_theta0, cos_theta0], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                    torch.stack([sin_phi0 * cos_theta0, zeros], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                ],
+                -1,
+            )
+            .unsqueeze(0)
+            .permute(2, 0, 1, 3)
+        )
+        offdiag0 = (
+            torch.stack(
+                [
+                    torch.stack([-cos_phi0 * sin_theta0, sin_theta0], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                    torch.stack([-sin_phi0 * sin_theta0, zeros], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                ],
+                -1,
+            )
+            .unsqueeze(0)
+            .permute(2, 0, 1, 3)
+        )
 
-        diag1 = torch.stack([
-            torch.stack([cos_phi1*cos_theta1, cos_theta1], 1).view(-1, self.capacity//2),
-            torch.stack([sin_phi1*cos_theta1, zeros], 1).view(-1, self.capacity//2),
-        ], -1).unsqueeze(0).permute(2,0,1,3)
-        offdiag1 = torch.stack([
-            torch.stack([-cos_phi1*sin_theta1, sin_theta1], 1).view(-1, self.capacity//2),
-            torch.stack([-sin_phi1*sin_theta1, zeros], 1).view(-1, self.capacity//2),
-        ], -1).unsqueeze(0).permute(2,0,1,3)
+        diag1 = (
+            torch.stack(
+                [
+                    torch.stack([cos_phi1 * cos_theta1, cos_theta1], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                    torch.stack([sin_phi1 * cos_theta1, zeros], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                ],
+                -1,
+            )
+            .unsqueeze(0)
+            .permute(2, 0, 1, 3)
+        )
+        offdiag1 = (
+            torch.stack(
+                [
+                    torch.stack([-cos_phi1 * sin_theta1, sin_theta1], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                    torch.stack([-sin_phi1 * sin_theta1, zeros], 1).view(
+                        -1, self.capacity // 2
+                    ),
+                ],
+                -1,
+            )
+            .unsqueeze(0)
+            .permute(2, 0, 1, 3)
+        )
 
         # loop over the capacity
         for d0, d1, o0, o1 in zip(diag0, diag1, offdiag0, offdiag1):
             # first layer
-            x_perm = torch.stack([x[:,1::2], x[:,::2]], 2).view(bs, self.hidden_size, 2)
+            x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(
+                bs, self.hidden_size, 2
+            )
             x = cm(x, d0) + cm(x_perm, o0)
 
             # periodic boundary conditions
-            x = torch.cat([x[:,1:], x[:,:1]], 1)
+            x = torch.cat([x[:, 1:], x[:, :1]], 1)
 
             # second layer
-            x_perm = torch.stack([x[:,1::2], x[:,::2]], 2).view(bs, self.hidden_size, 2)
+            x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(
+                bs, self.hidden_size, 2
+            )
             x = cm(x, d1) + cm(x_perm, o1)
 
             # periodic boundary conditions
-            x = torch.cat([x[:,-1:], x[:,:-1]], 1)
+            x = torch.cat([x[:, -1:], x[:, :-1]], 1)
 
         return x
 
 
-####################
-## Recurrent Unit ##
-####################
+## Recurrent Unit
 
 
 class EURNN(torch.nn.Module):
@@ -222,8 +276,6 @@ class EURNN(torch.nn.Module):
     case is however that the action of the internal weight matrix can be represented by
     a unitary matrix.
 
-    This EURNN was based on the tunable version of the EURNN proposed in
-    https://arxiv.org/abs/1612.05231.
     """
 
     def __init__(
