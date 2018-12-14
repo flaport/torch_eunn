@@ -24,3 +24,7 @@ Neural Network (EUNN) Cell. This implementation was based on the tunable EUNN pr
 ## Requirements
 
 * [PyTorch](http://pytorch.org) >= 0.4.0: `conda install pytorch -c pytorch`
+
+## License
+© Floris Laporte, 2018-2019.
+Made available under the MIT license.
