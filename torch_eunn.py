@@ -66,8 +66,9 @@ def cm(x, y):
 class ModReLU(torch.nn.Module):
     """ A modular ReLU activation function for complex-valued tensors """
 
-    def __init__(self):
+    def __init__(self, size):
         super(ModReLU, self).__init__()
+        self.bias = torch.nn.Parameter(torch.rand(1, size))
         self.relu = torch.nn.ReLU()
 
     def forward(self, x, eps=1e-5):
@@ -83,7 +84,7 @@ class ModReLU(torch.nn.Module):
         x_re, x_im = x[..., 0], x[..., 1]
         norm = torch.sqrt(x_re ** 2 + x_im ** 2) + 1e-5
         phase_re, phase_im = x_re / norm, x_im / norm
-        activated_norm = self.relu(norm)
+        activated_norm = self.relu(norm + self.bias)
         modrelu = torch.stack(
             [activated_norm * phase_re, activated_norm * phase_im], -1
         )
@@ -297,8 +298,8 @@ class EURNN(torch.nn.Module):
                 batch or the sequence.
         """
         super(EURNN, self).__init__()
-        self.hidden_size = hidden_size
-        self.batch_first = batch_first
+        self.hidden_size = int(hidden_size)
+        self.batch_first = int(batch_first)
         self.output_function = {
             "real": lambda x: x[..., 0],
             "imag": lambda x: x[..., 1],
@@ -307,9 +308,9 @@ class EURNN(torch.nn.Module):
         }[output_type]
         self.output_type = output_type
 
-        self.input_layer = torch.nn.Linear(input_size, hidden_size, bias=False)
+        self.input_layer = torch.nn.Linear(input_size, hidden_size, bias=True)
         self.hidden_layer = EUNN(hidden_size, capacity=capacity)
-        self.modrelu = ModReLU()
+        self.modrelu = ModReLU(hidden_size)
 
     def forward(self, input, state=None):
         """ forward pass through the RNN
