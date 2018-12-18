@@ -26,6 +26,7 @@ paper: [https://arxiv.org/abs/1612.05231](https://arxiv.org/abs/1612.05231).
 
 * 00: [Simple Tests](examples/00_simple_tests.ipynb)
 * 01: [Copying Task](examples/01_copying_task.ipynb)
+* 02: [MNIST Task](examples/02_mnist.ipynb)
 
 
 ## Requirements
