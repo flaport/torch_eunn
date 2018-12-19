@@ -3,7 +3,7 @@
 This repository contains a simple PyTorch implementation of a Tunable Efficient
 Unitary Neural Network (EUNN) Cell.
 
-The implementation was loosely based on the tunable EUNN presented in this
+The implementation is loosely based on the tunable EUNN presented in this
 paper: [https://arxiv.org/abs/1612.05231](https://arxiv.org/abs/1612.05231).
 
 
@@ -21,6 +21,8 @@ paper: [https://arxiv.org/abs/1612.05231](https://arxiv.org/abs/1612.05231).
     from torch_eunn import EURNN # recurrent unit
 ```
 
+#### Note
+The `hidden_size` ***and*** the `capacity` of the EUNN need to be ***even***, as explained in the section *"Difference with original implementation"*.
 
 ## Examples
 
@@ -35,6 +37,7 @@ paper: [https://arxiv.org/abs/1612.05231](https://arxiv.org/abs/1612.05231).
 
 
 ## Difference with original implementation
+
 
 This implementation of the EUNN has a major difference with the original
 implementation proposed in
