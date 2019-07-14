@@ -120,11 +120,11 @@ class EUNN(torch.nn.Module):
         """
         # validate parameters
         if hidden_size % 2 != 0:
-            raise ValueError("EUNN hidden_size should be even")
+            raise ValueError("EUNN `hidden_size` should be even")
         if capacity is None:
             capacity = hidden_size
         elif capacity % 2 != 0:
-            raise ValueError("EUNN capacity should be even")
+            raise ValueError("EUNN `capacity` should be even")
 
         self.hidden_size = int(round(hidden_size))
         self.capacity = int(round(capacity))
@@ -132,20 +132,9 @@ class EUNN(torch.nn.Module):
         # initialize
         super(EUNN, self).__init__()
 
-        # phi and theta for the even layers (count starts at 0)
-        self.phi0 = torch.nn.Parameter(
-            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
-        )
-        self.theta0 = torch.nn.Parameter(
-            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
-        )
-
-        # phi and theta for the odd layers (count starts at 0)
-        self.phi1 = torch.nn.Parameter(
-            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
-        )
-        self.theta1 = torch.nn.Parameter(
-            2 * pi * torch.randn(self.hidden_size // 2, self.capacity // 2)
+        # monolithic block of angles:
+        self.angles = torch.nn.Parameter(
+            2 * pi * torch.randn(self.hidden_size, self.capacity)
         )
 
     def forward(self, x):
@@ -169,15 +158,25 @@ class EUNN(torch.nn.Module):
                 "with the complex components stored in the last dimension (x.shape[2]==2)"
             )
 
-        # calculate the sin and cos of rotaion angles
-        cos_phi0 = torch.cos(self.phi0)
-        sin_phi0 = torch.sin(self.phi0)
-        cos_theta0 = torch.cos(self.theta0)
-        sin_theta0 = torch.sin(self.theta0)
-        cos_phi1 = torch.cos(self.phi1)
-        sin_phi1 = torch.sin(self.phi1)
-        cos_theta1 = torch.cos(self.theta1)
-        sin_theta1 = torch.sin(self.theta1)
+        # references to parts in the monolithic block of angles:
+
+        # phi and theta for the even layers
+        phi0 = self.angles[::2, ::2]
+        theta0 = self.angles[1::2, ::2]
+
+        # phi and theta for the odd layers
+        phi1 = self.angles[::2, 1::2]
+        theta1 = self.angles[1::2, 1::2]
+
+        # calculate the sin and cos of rotation angles
+        cos_phi0 = torch.cos(phi0)
+        sin_phi0 = torch.sin(phi0)
+        cos_theta0 = torch.cos(theta0)
+        sin_theta0 = torch.sin(theta0)
+        cos_phi1 = torch.cos(phi1)
+        sin_phi1 = torch.sin(phi1)
+        cos_theta1 = torch.cos(theta1)
+        sin_theta1 = torch.sin(theta1)
 
         # calculate the rotation vectors
         # shape = (capacity//2, 1, hidden_size, 2=(real|imag))
@@ -212,7 +211,6 @@ class EUNN(torch.nn.Module):
             .unsqueeze(0)
             .permute(2, 0, 1, 3)
         )
-
         diag1 = (
             torch.stack(
                 [
