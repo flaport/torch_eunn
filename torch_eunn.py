@@ -29,7 +29,7 @@ based on https://arxiv.org/abs/1612.05231
 
 name = "torch_eunn"
 __author__ = "Floris Laporte"
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 ## Imports
@@ -155,7 +155,7 @@ class EUNN(torch.nn.Module):
         )
 
     def forward(self, x):
-        """ forward pass through the layer
+        r""" forward pass through the layer
 
         Args:
             x (torch.tensor): A 3-dimensional torch float tensor with the
@@ -166,15 +166,27 @@ class EUNN(torch.nn.Module):
             torch.tensor: A 3-dimensional torch float tensor with the real and
                 imaginary part stored in the last dimension of the tensor; i.e.
                 with shape (batch_size, features, 2)
+
+        Note:
+            The following convention for the unitary representation of a single
+            mixing unit was chosen:
+
+            .. math::
+                M = \begin{pmatrix}
+                e^{i\phi} \cos{\theta} & -e^{i\phi}\sin{\theta} \\
+                \sin{\theta} & \cos{\theta}
+                \end{pmatrix}
+
         """
 
         # get and validate shape of input tensor:
-        batch_size, hidden_size, ri = x.shape
-        if hidden_size != self.hidden_size:
+        b, m, ri = x.shape
+        c = self.capacity
+        if m != self.hidden_size:
             raise ValueError(
                 "Input tensor for EUNN layer has size %i, "
                 "but the EUNN layer expects a size of %i"
-                % (hidden_size, self.hidden_size)
+                % (m, self.hidden_size)
             )
         elif ri != 2:
             raise ValueError(
@@ -182,109 +194,33 @@ class EUNN(torch.nn.Module):
                 "with the complex components stored in the last dimension (x.shape[2]==2)"
             )
 
-        # references to parts in the monolithic block of angles:
-
-        # phi and theta for the even layers
-        phi0 = self.angles[::2, ::2]
-        theta0 = self.angles[1::2, ::2]
-
-        # phi and theta for the odd layers
-        phi1 = self.angles[::2, 1::2]
-        theta1 = self.angles[1::2, 1::2]
+        # phis and thetas
+        phi = self.angles[::2]
+        theta = self.angles[1::2]
 
         # calculate the sin and cos of rotation angles
-        cos_phi0 = torch.cos(phi0)
-        sin_phi0 = torch.sin(phi0)
-        cos_theta0 = torch.cos(theta0)
-        sin_theta0 = torch.sin(theta0)
-        cos_phi1 = torch.cos(phi1)
-        sin_phi1 = torch.sin(phi1)
-        cos_theta1 = torch.cos(theta1)
-        sin_theta1 = torch.sin(theta1)
+        cos_phi = torch.cos(phi)
+        sin_phi = torch.sin(phi)
+        cos_theta = torch.cos(theta)
+        sin_theta = torch.sin(theta)
 
         # calculate the rotation vectors
-        # shape = (capacity//2, 1, hidden_size, 2=(real|imag))
-        zeros = torch.zeros_like(cos_theta0)
-        diag0 = (
-            torch.stack(
-                [
-                    torch.stack([cos_phi0 * cos_theta0, cos_theta0], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                    torch.stack([sin_phi0 * cos_theta0, zeros], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                ],
-                -1,
-            )
-            .unsqueeze(0)
-            .permute(2, 0, 1, 3)
-        )
-        offdiag0 = (
-            torch.stack(
-                [
-                    torch.stack([-cos_phi0 * sin_theta0, sin_theta0], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                    torch.stack([-sin_phi0 * sin_theta0, zeros], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                ],
-                -1,
-            )
-            .unsqueeze(0)
-            .permute(2, 0, 1, 3)
-        )
-        diag1 = (
-            torch.stack(
-                [
-                    torch.stack([cos_phi1 * cos_theta1, cos_theta1], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                    torch.stack([sin_phi1 * cos_theta1, zeros], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                ],
-                -1,
-            )
-            .unsqueeze(0)
-            .permute(2, 0, 1, 3)
-        )
-        offdiag1 = (
-            torch.stack(
-                [
-                    torch.stack([-cos_phi1 * sin_theta1, sin_theta1], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                    torch.stack([-sin_phi1 * sin_theta1, zeros], 1).view(
-                        -1, self.capacity // 2
-                    ),
-                ],
-                -1,
-            )
-            .unsqueeze(0)
-            .permute(2, 0, 1, 3)
-        )
+        # shape = (c, 1, m, 2)
+        zeros = torch.zeros_like(cos_theta)
+        diag = torch.stack([
+            torch.stack([cos_phi * cos_theta, cos_theta], 1).view(-1, c),
+            torch.stack([sin_phi * cos_theta, zeros], 1).view(-1, c),
+        ], -1).unsqueeze(0).permute(2, 0, 1, 3)
+        offdiag = torch.stack([
+            torch.stack([-cos_phi * sin_theta, sin_theta], 1).view(-1, c),
+            torch.stack([-sin_phi * sin_theta, zeros], 1).view(-1, c),
+        ], -1).unsqueeze(0).permute(2, 0, 1, 3)
 
-        # loop over the capacity
-        for d0, d1, o0, o1 in zip(diag0, diag1, offdiag0, offdiag1):
-            # first layer
-            x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(
-                batch_size, self.hidden_size, 2
-            )
-            x = cm(x, d0) + cm(x_perm, o0)
-
-            # periodic boundary conditions
-            x = torch.cat([x[:, 1:], x[:, :1]], 1)
-
-            # second layer
-            x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(
-                batch_size, self.hidden_size, 2
-            )
-            x = cm(x, d1) + cm(x_perm, o1)
-
-            # periodic boundary conditions
-            x = torch.cat([x[:, -1:], x[:, :-1]], 1)
+        # loop over sublayers
+        for i, (d, o) in enumerate(zip(diag, offdiag)):
+            x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(b, m, 2)
+            x = cm(x, d) + cm(x_perm, o)
+            x = torch.roll(x, 2*(i%2)-1, 1) # periodic boundary conditions
 
         return x
 
