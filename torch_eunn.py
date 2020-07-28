@@ -45,10 +45,17 @@ def cm(x, y):
     """ Complex multiplication between two torch tensors
 
         Args:
-            x (torch.tensor): A torch float tensor with the real and imaginary part
-                stored in the last dimension of the tensor; i.e. x.shape = [a, ...,b, 2]
-            y (torch.tensor): A torch float tensor with the real and imaginary part
-                stored in the last dimension of the tensor; i.e. y.shape = [a, ...,b, 2]
+            x (torch.tensor): A (n+1)-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the
+                tensor; i.e. with shape (d_0, d_1, ..., d_{n-1}, 2)
+            y (torch.tensor): A (n+1)-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the
+                tensor; i.e. with shape (d_0, d_1, ..., d_{n-1}, 2)
+
+        Returns:
+            torch.tensor: A (n+1)-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the
+                tensor; i.e. with shape (d_0, d_1, ..., d_{n-1}, 2)
     """
     result = torch.stack(
         [
@@ -67,6 +74,11 @@ class ModReLU(torch.nn.Module):
     """ A modular ReLU activation function for complex-valued tensors """
 
     def __init__(self, size):
+        """ ModReLU
+
+        Args:
+            size (torch.tensor): the number of features of the expected input tensor
+        """
         super(ModReLU, self).__init__()
         self.bias = torch.nn.Parameter(torch.rand(1, size))
         self.relu = torch.nn.ReLU()
@@ -75,14 +87,19 @@ class ModReLU(torch.nn.Module):
         """ ModReLU forward
 
         Args:
-            x (torch.tensor): A torch float tensor with the real and imaginary part
-                stored in the last dimension of the tensor; i.e. x.shape = [a, ...,b, 2]
-        Kwargs:
-            eps (float): A small number added to the norm of the complex tensor for
-                numerical stability.
+            x (torch.tensor): A 3-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the
+                tensor; i.e. with shape (batch_size, features, 2)
+            eps (optional, float): A small number added to the norm of the
+                complex tensor for numerical stability.
+
+        Returns:
+            torch.tensor: A 3-dimensional torch float tensor with the real and
+                imaginary part stored in the last dimension of the tensor; i.e.
+                with shape (batch_size, features, 2)
         """
         x_re, x_im = x[..., 0], x[..., 1]
-        norm = torch.sqrt(x_re ** 2 + x_im ** 2) + 1e-5
+        norm = torch.sqrt(x_re ** 2 + x_im ** 2) + eps
         phase_re, phase_im = x_re / norm, x_im / norm
         activated_norm = self.relu(norm + self.bias)
         modrelu = torch.stack(
@@ -91,11 +108,11 @@ class ModReLU(torch.nn.Module):
         return modrelu
 
 
-## Feed-forward Layer
+## Feed-forward layer
 
 
 class EUNN(torch.nn.Module):
-    """ Efficient Unitary Neural Network Layer
+    """ Efficient Unitary Neural Network layer
 
     This layer works similarly as a torch.nn.Linear layer. The difference in this case
     is however that the action of this layer can be represented by a unitary matrix.
@@ -108,7 +125,7 @@ class EUNN(torch.nn.Module):
     """
 
     def __init__(self, hidden_size, capacity=None):
-        """ EUNN __init__
+        """ Efficient Unitary Neural Network layer
 
         Args:
             hidden_size (int): the size of the unitary matrix this cell represents.
@@ -141,20 +158,27 @@ class EUNN(torch.nn.Module):
         """ forward pass through the layer
 
         Args:
-            x (torch.tensor): Tensor with shape (batch_size, hidden_size, 2=(real|imag))
+            x (torch.tensor): A 3-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the
+                tensor; i.e. with shape (batch_size, features, 2)
+
+        Returns:
+            torch.tensor: A 3-dimensional torch float tensor with the real and
+                imaginary part stored in the last dimension of the tensor; i.e.
+                with shape (batch_size, features, 2)
         """
 
         # get and validate shape of input tensor:
-        bs, hidden_size, ri = x.shape
+        batch_size, hidden_size, ri = x.shape
         if hidden_size != self.hidden_size:
             raise ValueError(
-                "Input tensor for EUNN Layer has size %i, "
-                "but the EUNN Layer expects a size of %i"
+                "Input tensor for EUNN layer has size %i, "
+                "but the EUNN layer expects a size of %i"
                 % (hidden_size, self.hidden_size)
             )
         elif ri != 2:
             raise ValueError(
-                "Input tensor for EUNN Layer should be complex, "
+                "Input tensor for EUNN layer should be complex, "
                 "with the complex components stored in the last dimension (x.shape[2]==2)"
             )
 
@@ -246,7 +270,7 @@ class EUNN(torch.nn.Module):
         for d0, d1, o0, o1 in zip(diag0, diag1, offdiag0, offdiag1):
             # first layer
             x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(
-                bs, self.hidden_size, 2
+                batch_size, self.hidden_size, 2
             )
             x = cm(x, d0) + cm(x_perm, o0)
 
@@ -255,7 +279,7 @@ class EUNN(torch.nn.Module):
 
             # second layer
             x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(
-                bs, self.hidden_size, 2
+                batch_size, self.hidden_size, 2
             )
             x = cm(x, d1) + cm(x_perm, o1)
 
@@ -265,35 +289,35 @@ class EUNN(torch.nn.Module):
         return x
 
 
-## Recurrent Unit
+## Recurrent unit
 
 
 class EURNN(torch.nn.Module):
-    """ Pytorch EURNN Recurrent unit
+    """ Efficient Unitary Recurrent Neural Network unit
 
-    This recurrent cell works similarly as a torch.nn.RNN layer. The difference in this
-    case is however that the action of the internal weight matrix can be represented by
-    a unitary matrix.
+    This recurrent cell works similarly as a torch.nn.RNN layer. The difference
+    in this case is however that the action of the internal weight matrix is
+    represented by a unitary matrix.
 
     """
 
     def __init__(
         self, input_size, hidden_size, capacity=2, output_type="real", batch_first=False
     ):
-        """ EURNN __init__
+        """  Efficient Unitary Recurrent Neural Network unit
 
         Args:
             input_size (int): the size of the input vector
             hidden_size (int): the size of the internal unitary matrix.
-            capacity (int): 0 < capacity <= hidden_size. This number represents the
-                number of layers containing unitary rotations. The higher the capacity,
-                the more of the unitary matrix space can be filled. This obviously
-                introduces a speed penalty. In recurrent neural networks, a small
-                capacity is usually preferred.
+            capacity (int): 0 < capacity <= hidden_size. This number represents
+                the number of layers containing unitary rotations. The higher
+                the capacity, the more of the unitary matrix space can be
+                filled. This obviously introduces a speed penalty. In recurrent
+                neural networks, a small capacity is usually preferred.
             output_type (str): how to return the output. Allowed values are
                 'complex', real', 'imag', 'abs'.
-            batch_first (bool): if the first dimension of the input vector is the
-                batch or the sequence.
+            batch_first (bool): if the first dimension of the input vector is
+                the batch or the sequence.
         """
         super(EURNN, self).__init__()
         self.hidden_size = int(hidden_size)
@@ -314,9 +338,18 @@ class EURNN(torch.nn.Module):
         """ forward pass through the RNN
 
         Args:
-            input (torch.tensor): Tensor with shape
-                (sequence_length, batch_size, feature_size, 2) if batch_first==False
-                (batch_size, sequence_length, feature_size, 2) if batch_first==True
+            input (torch.tensor): A 4-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the tensor;
+                i.e. with shape
+                    (batch_size, sequence_length, feature_size, 2) if self.batch_first==True
+                    (sequence_length, batch_size, feature_size, 2) if self.batch_first==False
+
+        Returns:
+            torch.tensor: A 4-dimensional torch float tensor with the
+                real and imaginary part stored in the last dimension of the tensor;
+                i.e. with shape
+                    (batch_size, sequence_length, feature_size, 2) if self.batch_first==True
+                    (sequence_length, batch_size, feature_size, 2) if self.batch_first==False
 
         """
 
