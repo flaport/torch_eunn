@@ -41,8 +41,8 @@ from math import pi
 ## Useful Functions
 
 
-def cm(x, y):
-    """ Complex multiplication between two torch tensors
+def _cmm(x, y):
+    """ Complex elementwise multiplication between two torch tensors
 
         Args:
             x (torch.tensor): A (n+1)-dimensional torch float tensor with the
@@ -73,14 +73,15 @@ def cm(x, y):
 class ModReLU(torch.nn.Module):
     """ A modular ReLU activation function for complex-valued tensors """
 
-    def __init__(self, size):
+    def __init__(self, hidden_size):
         """ ModReLU
 
         Args:
-            size (torch.tensor): the number of features of the expected input tensor
+            hidden_size (int): the number of features of the input/output tensors.
         """
         super(ModReLU, self).__init__()
-        self.bias = torch.nn.Parameter(torch.rand(1, size))
+        self.hidden_size = hidden_size
+        self.bias = torch.nn.Parameter(torch.rand(1, hidden_size))
         self.relu = torch.nn.ReLU()
 
     def forward(self, x, eps=1e-5):
@@ -89,14 +90,14 @@ class ModReLU(torch.nn.Module):
         Args:
             x (torch.tensor): A 3-dimensional torch float tensor with the
                 real and imaginary part stored in the last dimension of the
-                tensor; i.e. with shape (batch_size, features, 2)
+                tensor; i.e. with shape (batch_size, hidden_size, 2)
             eps (optional, float): A small number added to the norm of the
-                complex tensor for numerical stability.
+                complex tensor for numerical stability (default=1e-5).
 
         Returns:
             torch.tensor: A 3-dimensional torch float tensor with the real and
                 imaginary part stored in the last dimension of the tensor; i.e.
-                with shape (batch_size, features, 2)
+                with shape (batch_size, hidden_size, 2)
         """
         x_re, x_im = x[..., 0], x[..., 1]
         norm = torch.sqrt(x_re ** 2 + x_im ** 2) + eps
@@ -128,7 +129,8 @@ class EUNN(torch.nn.Module):
         """ Efficient Unitary Neural Network layer
 
         Args:
-            hidden_size (int): the size of the unitary matrix this cell represents.
+            hidden_size (int): the number of features of the input/output tensors.
+                This number should be even.
             capacity (int): 0 < capacity <= hidden_size. This number represents the
                 number of layers containing unitary rotations. The higher the capacity,
                 the more of the unitary matrix space can be filled. This obviously
@@ -140,8 +142,6 @@ class EUNN(torch.nn.Module):
             raise ValueError("EUNN `hidden_size` should be even")
         if capacity is None:
             capacity = hidden_size
-        elif capacity % 2 != 0:
-            raise ValueError("EUNN `capacity` should be even")
 
         self.hidden_size = int(round(hidden_size))
         self.capacity = int(round(capacity))
@@ -151,7 +151,7 @@ class EUNN(torch.nn.Module):
 
         # monolithic block of angles:
         self.angles = torch.nn.Parameter(
-            2 * pi * torch.randn(self.hidden_size, self.capacity)
+            2 * pi * torch.rand(self.hidden_size, self.capacity)
         )
 
     def forward(self, x):
@@ -160,12 +160,12 @@ class EUNN(torch.nn.Module):
         Args:
             x (torch.tensor): A 3-dimensional torch float tensor with the
                 real and imaginary part stored in the last dimension of the
-                tensor; i.e. with shape (batch_size, features, 2)
+                tensor; i.e. with shape (batch_size, hidden_size, 2)
 
         Returns:
             torch.tensor: A 3-dimensional torch float tensor with the real and
                 imaginary part stored in the last dimension of the tensor; i.e.
-                with shape (batch_size, features, 2)
+                with shape (batch_size, hidden_size, 2)
 
         Note:
             The following convention for the unitary representation of a single
@@ -184,14 +184,13 @@ class EUNN(torch.nn.Module):
         c = self.capacity
         if m != self.hidden_size:
             raise ValueError(
-                "Input tensor for EUNN layer has size %i, "
-                "but the EUNN layer expects a size of %i"
-                % (m, self.hidden_size)
+                "Input tensor for EUNN layer has hidden_size of %i, "
+                "but the EUNN layer expects a hidden_size of %i" % (m, self.hidden_size)
             )
         elif ri != 2:
             raise ValueError(
                 "Input tensor for EUNN layer should be complex, "
-                "with the complex components stored in the last dimension (x.shape[2]==2)"
+                "with the complex components stored in the last dimension (x.shape[-1]==2)"
             )
 
         # phis and thetas
@@ -210,17 +209,17 @@ class EUNN(torch.nn.Module):
         diag = torch.stack([
             torch.stack([cos_phi * cos_theta, cos_theta], 1).view(-1, c),
             torch.stack([sin_phi * cos_theta, zeros], 1).view(-1, c),
-        ], -1).unsqueeze(0).permute(2, 0, 1, 3)
+        ], -1)[None].permute(2, 0, 1, 3)
         offdiag = torch.stack([
             torch.stack([-cos_phi * sin_theta, sin_theta], 1).view(-1, c),
             torch.stack([-sin_phi * sin_theta, zeros], 1).view(-1, c),
-        ], -1).unsqueeze(0).permute(2, 0, 1, 3)
+        ], -1)[None].permute(2, 0, 1, 3)
 
         # loop over sublayers
         for i, (d, o) in enumerate(zip(diag, offdiag)):
             x_perm = torch.stack([x[:, 1::2], x[:, ::2]], 2).view(b, m, 2)
-            x = cm(x, d) + cm(x_perm, o)
-            x = torch.roll(x, 2*(i%2)-1, 1) # periodic boundary conditions
+            x = _cmm(x, d) + _cmm(x_perm, o)
+            x = torch.roll(x, 2 * (i % 2) - 1, 1)  # periodic boundary conditions
 
         return x
 
