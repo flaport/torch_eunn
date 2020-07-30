@@ -2,7 +2,7 @@
 
 import torch
 import numpy as np
-from torch_eunn import EUNN
+from torch_eunn import eunn, EUNN
 
 
 def test_unitarity():
@@ -53,6 +53,12 @@ def test_universality():
     )
 
     np.testing.assert_array_almost_equal(result, np.eye(num_hidden), decimal=2)
+
+
+def test_eunn_gradcheck():
+    angles = torch.randn(4, 6, requires_grad=True).double()
+    x = torch.randn(2, 4, 2, requires_grad=True).double()
+    assert torch.autograd.gradcheck(eunn, [angles, x])
 
 
 if __name__ == "__main__":
