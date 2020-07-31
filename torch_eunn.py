@@ -28,7 +28,6 @@ based on https://arxiv.org/abs/1612.05231
 # Metadata
 # --------------------------------------------------------------------------------
 
-name = "torch_eunn"
 __author__ = "Floris Laporte"
 __version__ = "0.3.0"
 __all__ = ["cmm", "eunn", "ModReLU", "EUNN", "EURNN"]
@@ -39,6 +38,10 @@ __all__ = ["cmm", "eunn", "ModReLU", "EUNN", "EURNN"]
 
 import torch
 from math import pi
+try:
+    import torch_eunn_cpp
+except ImportError:
+    torch_eunn_cpp = None
 
 
 # Helper functions
@@ -61,26 +64,12 @@ def cmm(x, y):
                 real and imaginary part stored in the last dimension of the
                 tensor; i.e. with shape (d_0, d_1, ..., d_{n-1}, 2)
     """
-    result = torch.stack(
-        [
-            x[..., 0] * y[..., 0] - x[..., 1] * y[..., 1],
-            x[..., 0] * y[..., 1] + x[..., 1] * y[..., 0],
-        ],
-        -1,
-    )
-    return result
+    return torch_eunn_cpp.cmm_forward(x, y)
 
 
 def _cmm_b(x, y):
     """ Backward pass for complex elementwise multiplication between two torch tensors """
-    result = torch.stack(
-        [
-            x[..., 0] * y[..., 0] + x[..., 1] * y[..., 1],
-            x[..., 0] * y[..., 1] - x[..., 1] * y[..., 0],
-        ],
-        -1,
-    )
-    return result
+    return torch_eunn_cpp.cmm_backward(x, y)
 
 
 def _permute(x):
@@ -147,41 +136,8 @@ class _EUNN(torch.autograd.Function):
                 f"correspond to the hidden size of 'angles' ('{angles.shape[0]}')"
             )
 
-        # relevant dimensions
-        b = x.shape[0]
-        m, c = angles.shape
-
-        # phis and thetas
-        phi = angles[::2]
-        theta = angles[1::2]
-
-        # calculate the sin and cos of rotation angles
-        cos_phi = torch.cos(phi)
-        sin_phi = torch.sin(phi)
-        cos_theta = torch.cos(theta)
-        sin_theta = torch.sin(theta)
-        zeros = torch.zeros_like(cos_theta)
-
         # fmt: off
-        # calculate the rotation vectors with shape = (c, 1, m, 2)
-        diag = torch.stack([
-            torch.stack([cos_phi * cos_theta, cos_theta], 1).view(-1, c),
-            torch.stack([sin_phi * cos_theta, zeros], 1).view(-1, c),
-        ], -1)[None].permute(2, 0, 1, 3)
-        offdiag = torch.stack([
-            torch.stack([-cos_phi * sin_theta, sin_theta], 1).view(-1, c),
-            torch.stack([-sin_phi * sin_theta, zeros], 1).view(-1, c),
-        ], -1)[None].permute(2, 0, 1, 3)
-        # fmt: on
-
-        # loop over sublayers
-        xs = torch.zeros((c, *x.shape), dtype=x.dtype, device=x.device)
-        for i, (d, o) in enumerate(zip(diag, offdiag)):
-            xs[i] = x
-            x = cmm(d, x) + cmm(o, _permute(x))
-            x = torch.roll(x, 2 * (i % 2) - 1, 1)
-
-        # fmt: off
+        x, angles, cos_phi, sin_phi, cos_theta, sin_theta, zeros, diag, offdiag, xs = torch_eunn_cpp.eunn_forward(angles, x)
         ctx.save_for_backward(angles, cos_phi, sin_phi, cos_theta, sin_theta, zeros, diag, offdiag, xs)
         # fmt: on
         return x
@@ -190,36 +146,8 @@ class _EUNN(torch.autograd.Function):
     def backward(ctx, dL_dx):
         # fmt: off
         angles, cos_phi, sin_phi, cos_theta, sin_theta, zeros, diag, offdiag, xs = ctx.saved_tensors
+        dL_dangles, dL_dx = torch_eunn_cpp.eunn_backward(dL_dx, angles, cos_phi, sin_phi, cos_theta, sin_theta, zeros, diag, offdiag, xs)
         # fmt: on
-
-        dL_ddiag = torch.zeros_like(diag)
-        dL_doffdiag = torch.zeros_like(offdiag)
-
-        for i in reversed(range(dL_ddiag.shape[0])):
-            x = xs[i]
-            dL_dx = torch.roll(dL_dx, 2 * ((i + 1) % 2) - 1, 1)
-            dL_ddiag[i] = _cmm_b(x, dL_dx).sum(0, keepdims=True)
-            dL_doffdiag[i] = _cmm_b(_permute(x), dL_dx).sum(0, keepdims=True)
-            dL_dx = _cmm_b(diag[i], dL_dx) + _permute(_cmm_b(offdiag[i], dL_dx))
-
-        dL_ddiag1_r = dL_ddiag[:, 0, ::2, 0].T
-        dL_ddiag2_r = dL_ddiag[:, 0, 1::2, 0].T
-        dL_ddiag1_i = dL_ddiag[:, 0, ::2, 1].T
-        dL_doffdiag1_r = dL_doffdiag[:, 0, ::2, 0].T
-        dL_doffdiag2_r = dL_doffdiag[:, 0, 1::2, 0].T
-        dL_doffdiag1_i = dL_doffdiag[:, 0, ::2, 1].T
-
-        # fmt: off
-        dL_dphi = -dL_ddiag1_r * sin_phi * cos_theta + dL_ddiag1_i * cos_phi * cos_theta
-        dL_dphi += dL_doffdiag1_r * sin_phi * sin_theta - dL_doffdiag1_i * cos_phi * sin_theta
-        dL_dtheta = -dL_ddiag1_r * cos_phi * sin_theta - dL_ddiag1_i * sin_phi * sin_theta
-        dL_dtheta += -dL_ddiag2_r * sin_theta
-        dL_dtheta += -dL_doffdiag1_r * cos_phi * cos_theta - dL_doffdiag1_i * sin_phi * cos_theta
-        dL_dtheta += dL_doffdiag2_r * cos_theta
-        # fmt: on
-
-        dL_dangles = torch.stack([dL_dphi, dL_dtheta], 1).view(*angles.shape)
-
         return dL_dangles, dL_dx
 
 
@@ -436,3 +364,4 @@ class EURNN(torch.nn.Module):
 
         # return output and internal state
         return output, state
+
