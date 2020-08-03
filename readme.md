@@ -22,9 +22,8 @@ this paper:
 
 #### Note
 
-The `hidden_size` **_and_** the `capacity` of the EUNN need to be
-**_even_**, as explained in the section _"Difference with original
-implementation"_.
+The `hidden_size` of the EUNN needs to be **_even_**, as explained in
+the section _"Difference with original implementation"_.
 
 ## Examples
 
